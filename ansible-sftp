@@ -1,0 +1,80 @@
+- name: SFTP setup for user asray (no firewalld module)
+hosts: localhost
+become: yes
+vars:
+sftp_user: "asray"
+sftp_password: "Asray@123"
+chroot_dir: "/home/asray"
+web_dir: "/home/asray/myblog/public"
+tasks:
+- name: Ensure OpenSSH server installed
+ansible.builtin.dnf:
+name: openssh-server
+state: present
+- name: Ensure sshd running
+ansible.builtin.service:
+name: sshd
+state: started
+enabled: yes
+- name: Create SFTP user
+ansible.builtin.user:
+name: "{{ sftp_user }}"
+create_home: yes
+home: "{{ chroot_dir }}"
+shell: /sbin/nologin
+- name: Set password for SFTP user
+ansible.builtin.shell: |
+echo "{{ sftp_user }}:{{ sftp_password }}" | chpasswd
+args:
+executable: /bin/bash
+- name: Create website directory
+ansible.builtin.file:
+path: "{{ web_dir }}"
+state: directory
+owner: "{{ sftp_user }}"
+group: "{{ sftp_user }}"
+mode: "0755"
+recurse: yes
+# Chroot rules: chroot dir must be owned by root and not writable by the user
+- name: Fix chroot directory ownership
+ansible.builtin.file:
+path: "{{ chroot_dir }}"
+owner: root
+group: root
+mode: "0755"
+- name: Ensure myblog folder owned by user
+ansible.builtin.file:
+path: "{{ chroot_dir }}/myblog"
+owner: "{{ sftp_user }}"
+group: "{{ sftp_user }}"
+recurse: yes
+- name: Enable password authentication in sshd_config
+ansible.builtin.lineinfile:
+path: /etc/ssh/sshd_config
+regexp: '^(#\s*)?PasswordAuthentication\s+'
+line: 'PasswordAuthentication yes'
+state: present
+- name: Configure SFTP-only chroot for user
+ansible.builtin.blockinfile:
+path: /etc/ssh/sshd_config
+marker: "# {mark} ANSIBLE SFTP ASRAY"
+block: |
+Match User {{ sftp_user }}
+ForceCommand internal-sftp
+ChrootDirectory {{ chroot_dir }}
+PasswordAuthentication yes
+AllowTcpForwarding no
+X11Forwarding no
+- name: Restart sshd
+ansible.builtin.service:
+name: sshd
+state: restarted
+- name: Show SFTP details
+ansible.builtin.debug:
+msg:
+- "SFTP Host: 65.0.18.76"
+- "Port: 22"
+- "Username: {{ sftp_user }}"
+- "Password: {{ sftp_password }}"
+- "After login, go to: /myblog/public"
+- "IMPORTANT: AWS Security Group must allow inbound TCP 22 (SSH)" 
